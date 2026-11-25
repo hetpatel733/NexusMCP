@@ -1,5 +1,0 @@
--e ./agent-runtime
--e ./context-manager
--e ./workflow-engine
--e ./mcp-connectors
--e ./agentic
