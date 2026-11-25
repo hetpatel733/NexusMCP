@@ -146,6 +146,23 @@ class TriggerIngestionService:
                 status=IngestionStatus.ACCEPTED,
                 error=str(e),
             )
+            # Record failed event in Dead Letter Queue for inspection and replay
+            try:
+                from ..observability.dlq_service import DeadLetterQueueService
+                dlq_service = DeadLetterQueueService(self.db)
+                await dlq_service.record_failure(
+                    workspace_id=envelope.workspace_id,
+                    event_id=envelope.event_id,
+                    workflow_id=envelope.workflow_id,
+                    workflow_version=envelope.workflow_version,
+                    provider=envelope.provider,
+                    event_type=envelope.event_type,
+                    error=str(e),
+                    payload=envelope.data,
+                    failure_stage="dispatch",
+                )
+            except Exception:
+                pass
 
         return WebhookIngressResponse(
             status="accepted",
@@ -156,67 +173,45 @@ class TriggerIngestionService:
         )
 
     async def _dispatch_event(self, envelope: EventEnvelope, event_db_id: str) -> str:
-        """Hand off accepted event to Temporal workflow execution or record pinned execution instance."""
-        now = datetime.now(timezone.utc)
-        execution_doc = {
-            "workspace_id": envelope.workspace_id,
-            "workflow_id": envelope.workflow_id,
-            "workflow_version": envelope.workflow_version or 1,
-            "status": "pending",
-            "triggered_by": envelope.provider,
-            "trigger_event": {
-                "event_id": envelope.event_id,
-                "event_type": envelope.event_type,
-                "payload_reference": envelope.payload_reference,
-                "data": envelope.data,
-            },
-            "started_at": now,
-        }
-        execution_id = await self.workflow_repo.create_execution(execution_doc)
-        logger.info(
-            "Workflow execution dispatched from trigger",
-            workspace_id=envelope.workspace_id,
-            workflow_id=envelope.workflow_id,
-            workflow_version=envelope.workflow_version,
-            execution_id=execution_id,
-            event_id=envelope.event_id,
-        )
+        """Hand off accepted event to Temporal workflow execution via ExecutionService.
 
-        # If Temporal client or dispatcher is available, trigger the Temporal workflow instance
-        if self.temporal_client:
-            try:
-                trigger_data = {
+        ExecutionService creates the execution record and dispatches to Temporal,
+        so we do not create a duplicate record here.
+        """
+        from ..execution.service import ExecutionService
+
+        # Dispatch via ExecutionService (which uses Temporal) with proper user context
+        execution_service = ExecutionService(self.db)
+        try:
+            execution_id = await execution_service.create_and_dispatch_execution(
+                workspace_id=envelope.workspace_id,
+                workflow_id=envelope.workflow_id,
+                triggered_by=envelope.provider,
+                trigger_event={
                     "event_id": envelope.event_id,
                     "event_type": envelope.event_type,
                     "payload_reference": envelope.payload_reference,
                     "data": envelope.data,
-                }
-                if hasattr(self.temporal_client, "dispatch_execution"):
-                    await self.temporal_client.dispatch_execution(
-                        workspace_id=envelope.workspace_id,
-                        workflow_id=envelope.workflow_id,
-                        execution_id=execution_id,
-                        workflow_version=envelope.workflow_version or 1,
-                        trigger_event=trigger_data,
-                    )
-                elif hasattr(self.temporal_client, "start_workflow"):
-                    from ..execution.workflows import WorkflowExecutionWorkflow
-                    workflow_id = f"wf-{envelope.workflow_id}-{execution_id}"
-                    wf_arg = {
-                        "workspace_id": envelope.workspace_id,
-                        "workflow_id": envelope.workflow_id,
-                        "execution_id": execution_id,
-                        "workflow_version": envelope.workflow_version or 1,
-                        "trigger_event": trigger_data,
-                    }
-                    await self.temporal_client.start_workflow(
-                        WorkflowExecutionWorkflow.run,
-                        wf_arg,
-                        id=workflow_id,
-                        task_queue="nexusmcp-task-queue",
-                    )
-            except Exception as e:
-                logger.warning("Temporal dispatch note", error=str(e))
+                },
+                workflow_version=envelope.workflow_version or 1,
+                user_id=None,  # Trigger events are system-initiated
+                user_role="member",
+            )
+            logger.info(
+                "Workflow execution dispatched from trigger",
+                workspace_id=envelope.workspace_id,
+                workflow_id=envelope.workflow_id,
+                workflow_version=envelope.workflow_version,
+                execution_id=execution_id,
+                event_id=envelope.event_id,
+            )
+            return execution_id
+        except Exception as e:
+            logger.warning("Execution dispatch failed", error=str(e), event_id=envelope.event_id)
+            # Return the event_db_id as fallback so the flow can continue
+            return event_db_id
+        except Exception as e:
+            logger.warning("Execution dispatch failed", error=str(e), execution_id=execution_id)
 
         return execution_id
 

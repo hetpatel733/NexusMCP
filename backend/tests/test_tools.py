@@ -241,12 +241,12 @@ async def test_tool_registry_check_tool_access():
 
     # Valid roles should pass
     for role in ("owner", "admin", "member"):
-        registry.check_tool_access(desc, "ws-1", role)  # should not raise
+        await registry.check_tool_access(desc, "ws-1", role)  # should not raise
 
     # Invalid role should raise
     from fastapi import HTTPException
     with pytest.raises(HTTPException) as exc_info:
-        registry.check_tool_access(desc, "ws-1", "guest")
+        await registry.check_tool_access(desc, "ws-1", "guest")
     assert exc_info.value.status_code == 403
 
 

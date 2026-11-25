@@ -38,6 +38,8 @@ class ExecutionService:
         triggered_by: str = "manual",
         trigger_event: Optional[Dict[str, Any]] = None,
         workflow_version: Optional[int] = None,
+        user_id: Optional[str] = None,
+        user_role: str = "member",
     ) -> Dict[str, Any]:
         """Create a new execution pinned to workflow_version and dispatch to Temporal worker."""
         # 1. Resolve workflow & version pinning
@@ -57,6 +59,8 @@ class ExecutionService:
 
         # 2. Persist execution record pinned to immutable version
         now = datetime.now(timezone.utc)
+        from ..observability.correlation import get_correlation_id
+        corr_id = get_correlation_id()
         record = {
             "workspace_id": workspace_id,
             "workflow_id": workflow_id,
@@ -64,6 +68,10 @@ class ExecutionService:
             "status": ExecutionStatus.PENDING.value,
             "triggered_by": triggered_by,
             "trigger_event": event_data,
+            "correlation_id": corr_id,
+            "user_id": user_id,
+            "user_role": user_role,
+            "created_at": now,
             "started_at": now,
             "steps": {},
         }
@@ -78,7 +86,17 @@ class ExecutionService:
                 execution_id=execution_id,
                 workflow_version=workflow_version,
                 trigger_event=event_data,
+                correlation_id=corr_id,
+                user_id=user_id,
+                user_role=user_role,
             )
+            if temporal_id:
+                await self.repo.update_execution_status(
+                    workspace_id=workspace_id,
+                    execution_id=execution_id,
+                    status=ExecutionStatus.PENDING.value,
+                    temporal_workflow_id=temporal_id,
+                )
         except Exception as e:
             logger.warning("Temporal dispatch note", error=str(e), execution_id=execution_id)
 

@@ -61,6 +61,9 @@ class TemporalWorkflowDispatcher:
         execution_id: str,
         workflow_version: int,
         trigger_event: Dict[str, Any],
+        correlation_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        user_role: str = "member",
     ) -> Optional[str]:
         """Dispatch a new Temporal execution instance pinned to workflow_version."""
         client = await self.ensure_client()
@@ -78,6 +81,9 @@ class TemporalWorkflowDispatcher:
             execution_id=execution_id,
             workflow_version=workflow_version,
             trigger_event=trigger_event,
+            correlation_id=correlation_id,
+            user_id=user_id,
+            user_role=user_role,
         )
 
         try:

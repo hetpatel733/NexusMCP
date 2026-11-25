@@ -470,3 +470,217 @@ export const apiListTools = async (): Promise<ToolItem[]> => {
     return res.data;
 };
 
+// ==========================================
+// Phase 9: Execution History & Observability
+// ==========================================
+
+export interface ExecutionRecord {
+    id: string;
+    workspace_id: string;
+    workflow_id: string;
+    workflow_version: number;
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+    triggered_by: string;
+    trigger_event: Record<string, any>;
+    started_at: string;
+    completed_at?: string;
+    duration_ms?: number;
+    error?: string;
+    steps?: Record<string, any>;
+    temporal_workflow_id?: string;
+    correlation_id?: string;
+}
+
+export interface StepExecutionRecord {
+    id: string;
+    workspace_id: string;
+    execution_id: string;
+    workflow_id: string;
+    workflow_version: number;
+    step_id: string;
+    step_name: string;
+    attempt: number;
+    status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+    idempotency_key: string;
+    correlation_id?: string;
+    input_data: Record<string, any>;
+    output_data?: Record<string, any>;
+    error?: string;
+    skip_reason?: string;
+    started_at: string;
+    completed_at?: string;
+    execution_time_ms?: number;
+}
+
+export interface ExecutionMetrics {
+    workspace_id: string;
+    workflow_id?: string;
+    timeframe_hours: number;
+    total_executions: number;
+    completed: number;
+    failed: number;
+    running: number;
+    pending: number;
+    cancelled: number;
+    success_rate_percent: number;
+    failure_rate_percent: number;
+    avg_duration_ms: number;
+    avg_trigger_delay_ms: number;
+    avg_queue_latency_ms: number;
+}
+
+export interface StepMetricItem {
+    step_id: string;
+    step_name: string;
+    total_attempts: number;
+    retries: number;
+    completed: number;
+    failures: number;
+    avg_duration_ms: number;
+    min_duration_ms: number;
+    max_duration_ms: number;
+}
+
+export interface StepMetrics {
+    workspace_id: string;
+    workflow_id?: string;
+    timeframe_hours: number;
+    total_retries: number;
+    step_metrics: StepMetricItem[];
+    provider_error_breakdown: Record<string, number>;
+}
+
+export interface AlertItem {
+    id: string;
+    workspace_id: string;
+    category: 'repeated_failures' | 'expired_connections' | 'webhook_renewal_failures' | 'unavailable_workers';
+    severity: 'info' | 'warning' | 'critical';
+    title: string;
+    description: string;
+    resource_type: string;
+    resource_id?: string;
+    created_at: string;
+    metadata: Record<string, any>;
+}
+
+export interface DLQEvent {
+    id: string;
+    workspace_id: string;
+    event_id: string;
+    workflow_id?: string;
+    workflow_version?: number;
+    provider: string;
+    event_type: string;
+    error: string;
+    payload: Record<string, any>;
+    headers?: Record<string, string>;
+    failure_stage: string;
+    status: 'failed' | 'replaying' | 'resolved' | 'discarded';
+    replay_count: number;
+    last_replayed_at?: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export const apiListExecutions = async (params?: {
+    workflow_id?: string;
+    status?: string;
+    limit?: number;
+    skip?: number;
+}): Promise<ExecutionRecord[]> => {
+    const res = await apiClient.get<ExecutionRecord[]>('/executions', { params });
+    return res.data;
+};
+
+export const apiGetExecution = async (executionId: string): Promise<ExecutionRecord> => {
+    const res = await apiClient.get<ExecutionRecord>(`/executions/${executionId}`);
+    return res.data;
+};
+
+export const apiGetExecutionSteps = async (executionId: string): Promise<StepExecutionRecord[]> => {
+    const res = await apiClient.get<StepExecutionRecord[]>(`/executions/${executionId}/steps`);
+    return res.data;
+};
+
+export const apiCancelExecution = async (executionId: string): Promise<{ message: string; execution_id: string }> => {
+    const res = await apiClient.post<{ message: string; execution_id: string }>(`/executions/${executionId}/cancel`);
+    return res.data;
+};
+
+export const apiRunWorkflow = async (
+    workflowId: string,
+    triggerData?: Record<string, any>,
+    version?: number
+): Promise<any> => {
+    const res = await apiClient.post(`/workflows/${workflowId}/run`, {
+        trigger_data: triggerData || {},
+        version,
+    });
+    return res.data;
+};
+
+export const apiGetExecutionMetrics = async (
+    workflowId?: string,
+    timeframeHours: number = 24
+): Promise<ExecutionMetrics> => {
+    const res = await apiClient.get<ExecutionMetrics>('/observability/metrics/executions', {
+        params: { workflow_id: workflowId, timeframe_hours: timeframeHours },
+    });
+    return res.data;
+};
+
+export const apiGetStepMetrics = async (
+    workflowId?: string,
+    timeframeHours: number = 24
+): Promise<StepMetrics> => {
+    const res = await apiClient.get<StepMetrics>('/observability/metrics/steps', {
+        params: { workflow_id: workflowId, timeframe_hours: timeframeHours },
+    });
+    return res.data;
+};
+
+export const apiGetAlerts = async (): Promise<AlertItem[]> => {
+    const res = await apiClient.get<AlertItem[]>('/observability/alerts');
+    return res.data;
+};
+
+export const apiListDLQEvents = async (params?: {
+    workflow_id?: string;
+    status?: string;
+    limit?: number;
+    skip?: number;
+}): Promise<DLQEvent[]> => {
+    const res = await apiClient.get<DLQEvent[]>('/observability/dlq', { params });
+    return res.data;
+};
+
+export const apiGetDLQEvent = async (dlqId: string): Promise<DLQEvent> => {
+    const res = await apiClient.get<DLQEvent>(`/observability/dlq/${dlqId}`);
+    return res.data;
+};
+
+export const apiReplayDLQEvent = async (
+    dlqId: string,
+    options?: { idempotency_key?: string; use_latest_version?: boolean }
+): Promise<any> => {
+    const res = await apiClient.post(`/observability/dlq/${dlqId}/replay`, options || {});
+    return res.data;
+};
+
+export const apiDiscardDLQEvent = async (dlqId: string): Promise<any> => {
+    const res = await apiClient.post(`/observability/dlq/${dlqId}/discard`);
+    return res.data;
+};
+
+export const getLiveUpdatesUrl = (executionId?: string): string => {
+    const token = localStorage.getItem('nexus_access_token') || '';
+    const wsId = localStorage.getItem('nexus_active_workspace_id') || '';
+    const base = `${API_BASE_URL}/api/v1/observability/live`;
+    const params = new URLSearchParams();
+    if (executionId) params.append('execution_id', executionId);
+    if (token) params.append('token', token);
+    if (wsId) params.append('workspace_id', wsId);
+    return `${base}?${params.toString()}`;
+};
+
+

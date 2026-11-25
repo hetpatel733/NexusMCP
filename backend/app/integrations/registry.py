@@ -356,29 +356,48 @@ class ToolRegistry:
     # ------------------------------------------------------------------
     # Permission / allowlist checks
     # ------------------------------------------------------------------
-    def check_tool_access(
+    async def check_tool_access(
         self,
         tool: ToolDescriptor,
         workspace_id: Optional[str],
         user_role: str,
     ) -> None:
-        """Raise HTTPException if the user is not allowed to invoke the tool."""
+        """Raise HTTPException if the user is not allowed to invoke the tool.
+
+        Enforces:
+          - Workspace-scoped tools require matching workspace_id.
+          - Globally available tools (workspace_id is None) can be used by
+            any member of any workspace.
+          - Role-based access: owner > admin > member.
+        """
         if not tool:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Tool not found",
             )
 
-        # Workspace-scoped tools require matching workspace
-        # (workspace_id None means globally available)
-        # Note: allowlist filtering is done at the repo/query level; this is
-        # a defense-in-depth role check.
-
         if user_role not in ("owner", "admin", "member"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Insufficient role to invoke tool",
             )
+
+        # Workspace-scoped tools: require matching workspace
+        # Read workspace_id from the registry entry (stored in DB)
+        # The tool descriptor itself may not carry workspace_id, so we check
+        # the repo entry if available.
+        if self.repo and workspace_id is not None:
+            entry = None
+            # Try cache first via get_tool which hits repo
+            tool_entry = await self.repo.get_entry(tool.id)
+            if tool_entry:
+                entry_workspace_id = tool_entry.get("workspace_id")
+                # None = globally available; otherwise must match
+                if entry_workspace_id is not None and entry_workspace_id != workspace_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Tool is not available in this workspace",
+                    )
 
     # ------------------------------------------------------------------
     # Invocation
@@ -416,7 +435,7 @@ class ToolRegistry:
                 ),
             )
 
-        self.check_tool_access(tool, workspace_id, user_role)
+        await self.check_tool_access(tool, workspace_id, user_role)
 
         # Validate input schema
         schema_errors = self._validate_input(tool.input_schema, arguments)

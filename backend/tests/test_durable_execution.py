@@ -52,6 +52,7 @@ class MockToolProvider:
         tool_id: str,
         arguments: Dict[str, Any],
         workspace_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         user_role: str = "member",
     ) -> ToolInvokedResult:
         self.invocations.append({

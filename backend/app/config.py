@@ -44,6 +44,49 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, description="Refresh token expiration in days")
     AUTH_RATE_LIMIT_PER_MINUTE: int = Field(default=10, description="Max auth requests per minute per IP")
     SECURE_COOKIES: bool = Field(default=False, description="Set secure cookie flag")
+    ENCRYPTION_MASTER_KEY: Optional[str] = Field(
+        default=None,
+        description="Master key for at-rest encryption of sensitive fields",
+    )
+    CORS_ALLOW_ORIGINS: str = Field(
+        default="*",
+        description="Comma-separated list of allowed CORS origins (use specific origins in production)",
+    )
+    API_RATE_LIMIT_PER_MINUTE: int = Field(
+        default=60,
+        description="Max API requests per minute per user/workspace",
+    )
+    EXECUTION_QUOTA_PER_USER_PER_HOUR: int = Field(
+        default=1000,
+        description="Max workflow executions per user per hour",
+    )
+    PAYLOAD_MAX_BYTES: int = Field(
+        default=2 * 1024 * 1024,
+        description="Maximum webhook payload size in bytes (default 2MB)",
+    )
+    PAYLOAD_EXTERNALIZATION_THRESHOLD_BYTES: int = Field(
+        default=32 * 1024,
+        description="Payload size above which data is externalized (default 32KB)",
+    )
+    # Data retention (in days)
+    RETENTION_DEDUPLICATION_DAYS: int = Field(
+        default=7, description="Deduplication record retention in days"
+    )
+    RETENTION_DLQ_DAYS: int = Field(
+        default=30, description="Dead letter queue event retention in days"
+    )
+    RETENTION_AUDIT_LOGS_DAYS: int = Field(
+        default=90, description="Audit log retention in days"
+    )
+    RETENTION_EXECUTION_LOGS_DAYS: int = Field(
+        default=90, description="Execution log retention in days"
+    )
+    RETENTION_STEP_LOGS_DAYS: int = Field(
+        default=90, description="Step log retention in days"
+    )
+    RETENTION_PAYLOADS_DAYS: int = Field(
+        default=30, description="Externalized payload retention in days"
+    )
 
     # Composio Integration
     COMPOSIO_API_KEY: Optional[str] = Field(default=None, description="Composio API key for managed OAuth")

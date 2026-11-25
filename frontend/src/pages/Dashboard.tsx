@@ -115,6 +115,45 @@ export const Dashboard: React.FC = () => {
                     </div>
 
                     <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '1.5rem' }}>
+                        <h3 style={{ marginTop: 0, fontSize: '1.1rem' }}>Executions & Traces</h3>
+                        <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                            Inspect live workflow executions, step durations, redacted parameters, and normalized errors.
+                        </p>
+                        <Link
+                            to="/executions"
+                            style={{ display: 'inline-block', marginTop: '0.5rem', color: '#2563eb', fontWeight: 600, textDecoration: 'none', fontSize: '0.875rem' }}
+                        >
+                            View Executions &rarr;
+                        </Link>
+                    </div>
+
+                    <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '1.5rem' }}>
+                        <h3 style={{ marginTop: 0, fontSize: '1.1rem' }}>Metrics & Health</h3>
+                        <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                            Operational KPIs: success rates, queue latency, trigger ingestion delay, and worker heartbeat alerts.
+                        </p>
+                        <Link
+                            to="/health-metrics"
+                            style={{ display: 'inline-block', marginTop: '0.5rem', color: '#2563eb', fontWeight: 600, textDecoration: 'none', fontSize: '0.875rem' }}
+                        >
+                            View Metrics &rarr;
+                        </Link>
+                    </div>
+
+                    <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '1.5rem' }}>
+                        <h3 style={{ marginTop: 0, fontSize: '1.1rem' }}>Dead Letter Queue (DLQ)</h3>
+                        <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                            Safely inspect failed trigger deliveries and trigger events, and perform controlled idempotent replays.
+                        </p>
+                        <Link
+                            to="/dlq"
+                            style={{ display: 'inline-block', marginTop: '0.5rem', color: '#2563eb', fontWeight: 600, textDecoration: 'none', fontSize: '0.875rem' }}
+                        >
+                            Manage DLQ &rarr;
+                        </Link>
+                    </div>
+
+                    <div style={{ backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '1.5rem' }}>
                         <h3 style={{ marginTop: 0, fontSize: '1.1rem' }}>System Status</h3>
                         <p style={{ color: '#64748b', fontSize: '0.875rem' }}>
                             Real-time health probes and dependency readiness for MongoDB, Temporal, and backend services.

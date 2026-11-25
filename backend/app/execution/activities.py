@@ -91,6 +91,11 @@ class ExecutionActivities:
         step_id = step.get("id", "unknown_step")
         step_name = step.get("name", step_id)
 
+        # Bind correlation ID for activity execution
+        if step_input.correlation_id:
+            from ..observability.correlation import set_correlation_id
+            set_correlation_id(step_input.correlation_id)
+
         # Determine attempt number
         try:
             attempt = activity.info().attempt
@@ -180,6 +185,7 @@ class ExecutionActivities:
             attempt=attempt,
             idempotency_key=idempotency_key,
             input_data=resolved_arguments,
+            correlation_id=step_input.correlation_id,
         )
 
         # 5. Invoke Tool via ToolRegistry
@@ -203,7 +209,8 @@ class ExecutionActivities:
                 tool_id=tool_id,
                 arguments=resolved_arguments,
                 workspace_id=workspace_id,
-                user_role="member",
+                user_id=step_input.user_id,
+                user_role=step_input.user_role,
             )
         except Exception as exc:
             elapsed_ms = int((time.time() - start_time) * 1000)

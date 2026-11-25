@@ -13,6 +13,9 @@ import { WorkspacesPage } from './pages/WorkspacesPage';
 import { WorkflowGenerationPage } from './pages/WorkflowGenerationPage';
 import { WorkflowsListPage } from './pages/WorkflowsListPage';
 import { WorkflowEditorPage } from './pages/WorkflowEditorPage';
+import { ExecutionsPage } from './pages/ExecutionsPage';
+import { WorkflowHealthPage } from './pages/WorkflowHealthPage';
+import { DeadLetterQueuePage } from './pages/DeadLetterQueuePage';
 
 export const App: React.FC = () => {
     return (
@@ -25,6 +28,9 @@ export const App: React.FC = () => {
                         <Route path="register" element={<Register />} />
                         <Route path="workflows" element={<WorkflowsListPage />} />
                         <Route path="workflows/:workflowId" element={<WorkflowEditorPage />} />
+                        <Route path="executions" element={<ExecutionsPage />} />
+                        <Route path="health-metrics" element={<WorkflowHealthPage />} />
+                        <Route path="dlq" element={<DeadLetterQueuePage />} />
                         <Route path="designer" element={<WorkflowGenerationPage />} />
                         <Route path="workspaces" element={<WorkspacesPage />} />
                         <Route path="profile" element={<ProfilePage />} />

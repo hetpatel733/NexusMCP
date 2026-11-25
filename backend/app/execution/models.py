@@ -75,6 +75,8 @@ class WorkflowExecutionInput(BaseModel):
     workflow_version: int
     trigger_event: Dict[str, Any] = Field(default_factory=dict)
     correlation_id: Optional[str] = None
+    user_id: Optional[str] = None
+    user_role: str = "member"
 
     model_config = ConfigDict(extra="ignore")
 
@@ -109,6 +111,8 @@ class StepExecutionInput(BaseModel):
     context_data: Dict[str, Any] = Field(default_factory=dict)
     attempt: int = 1
     correlation_id: Optional[str] = None
+    user_id: Optional[str] = None
+    user_role: str = "member"
 
     model_config = ConfigDict(extra="ignore")
 

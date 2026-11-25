@@ -67,6 +67,8 @@ async def run_workflow(
                 "data": req.trigger_data,
             },
             workflow_version=req.version,
+            user_id=current_user.get("id"),
+            user_role=str(workspace_and_role[1]),
         )
         return res
     except ValueError as e:
@@ -176,6 +178,35 @@ async def cancel_execution(
             detail="Could not cancel execution",
         )
     return {"message": "Execution cancelled successfully", "execution_id": execution_id}
+
+
+@router.get("/executions/{execution_id}/live")
+async def stream_execution_live(
+    execution_id: str,
+    workspace_and_role=Depends(get_current_workspace),
+    database=Depends(get_db),
+):
+    """Server-Sent Events (SSE) live updates stream for this specific execution."""
+    from fastapi.responses import StreamingResponse
+    from ...observability.broadcaster import get_broadcaster
+
+    workspace, _ = workspace_and_role
+    service = ExecutionService(database)
+    execution = await service.get_execution(workspace["id"], execution_id)
+    if not execution:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Execution not found")
+
+    broadcaster = get_broadcaster()
+    return StreamingResponse(
+        broadcaster.event_generator(workspace_id=workspace["id"], execution_id=execution_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
 
 
 @router.get("/executions/payloads/{payload_id}")

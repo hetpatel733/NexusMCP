@@ -20,6 +20,23 @@ async def ping_activity(payload: str = "ping") -> str:
     return f"pong: {payload}"
 
 
+async def run_worker_heartbeat_loop(db, worker_id: str = "worker-default"):
+    """Periodic heartbeat reporter for worker node observability and alerting."""
+    from .observability.alerts import AlertEvaluator
+    evaluator = AlertEvaluator(db)
+    while True:
+        try:
+            await evaluator.record_worker_heartbeat(
+                worker_id=worker_id,
+                task_queue="nexusmcp-task-queue",
+            )
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug("Worker heartbeat tick error", error=str(e))
+        await asyncio.sleep(30)
+
+
 async def run_trigger_scheduler_loop(db, ingestion_service):
     """Background task running polling engine and schedule triggers periodically."""
     polling_engine = PollingEngine(db, ingestion_service)
@@ -62,8 +79,11 @@ async def run_worker():
         db = None
         ingestion_service = None
 
-    # Start trigger scheduler background task if DB ready
+    # Start trigger scheduler and worker heartbeat background tasks if DB ready
     scheduler_task = None
+    heartbeat_task = None
+    if db:
+        heartbeat_task = asyncio.create_task(run_worker_heartbeat_loop(db, f"worker-{settings.TEMPORAL_NAMESPACE}"))
     if db and ingestion_service:
         scheduler_task = asyncio.create_task(run_trigger_scheduler_loop(db, ingestion_service))
 
