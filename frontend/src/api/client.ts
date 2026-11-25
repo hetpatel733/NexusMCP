@@ -265,3 +265,208 @@ export const apiGetConnectionStatus = async (connectionId: string): Promise<Conn
 export const apiRevokeConnection = async (connectionId: string): Promise<void> => {
     await apiClient.delete(`/connections/${connectionId}`);
 };
+
+// Workflows & Versioning API (Phase 6)
+export type WorkflowStatus = 'draft' | 'ready' | 'active' | 'paused' | 'needs_attention' | 'archived';
+
+export interface DataMapping {
+    target_field: string;
+    source: string;
+    value?: any;
+}
+
+export interface StepCondition {
+    field: string;
+    operator: string;
+    value?: any;
+}
+
+export interface ErrorPolicy {
+    strategy: string;
+    max_retries: number;
+    retry_delay_seconds: number;
+    backoff_multiplier: number;
+}
+
+export interface WorkflowStep {
+    id: string;
+    name: string;
+    tool_id: string;
+    provider: string;
+    app_name?: string;
+    arguments: Record<string, any>;
+    data_mappings: DataMapping[];
+    dependencies: string[];
+    conditions: StepCondition[];
+    error_policy: ErrorPolicy;
+}
+
+export interface TriggerConfig {
+    type: string;
+    provider?: string;
+    event?: string;
+    cron?: string;
+    interval_seconds?: number;
+    parameters: Record<string, any>;
+}
+
+export interface WorkflowDetail {
+    id: string;
+    workspace_id: string;
+    name: string;
+    description?: string;
+    status: WorkflowStatus;
+    schema_version: string;
+    current_version: number;
+    active_version?: number;
+    required_integrations: string[];
+    trigger: TriggerConfig;
+    steps: WorkflowStep[];
+    validation_errors?: string[];
+    approved_at?: string;
+    approved_by?: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface WorkflowVersionRecord {
+    id: string;
+    workspace_id: string;
+    workflow_id: string;
+    version: number;
+    definition: {
+        name: string;
+        description?: string;
+        status: string;
+        required_integrations: string[];
+        trigger: TriggerConfig;
+        steps: WorkflowStep[];
+    };
+    change_summary?: string;
+    created_by: string;
+    created_at: string;
+}
+
+export interface WorkflowValidationResponse {
+    valid: boolean;
+    workflow_id: string;
+    version: number;
+    definition_errors: string[];
+    integration_errors: string[];
+    errors: string[];
+}
+
+export interface ToolItem {
+    id: string;
+    provider: string;
+    name: string;
+    description: string;
+    input_schema: {
+        type?: string;
+        properties?: Record<string, any>;
+        required?: string[];
+    };
+    connection_required: boolean;
+    scopes: string[];
+    risk_category: string;
+    tags: string[];
+}
+
+export const apiListWorkflows = async (): Promise<WorkflowDetail[]> => {
+    const res = await apiClient.get<WorkflowDetail[]>('/workflows');
+    return res.data;
+};
+
+export const apiGetWorkflow = async (workflowId: string): Promise<WorkflowDetail> => {
+    const res = await apiClient.get<WorkflowDetail>(`/workflows/${workflowId}`);
+    return res.data;
+};
+
+export const apiCreateWorkflow = async (data: Partial<WorkflowDetail>): Promise<WorkflowDetail> => {
+    const res = await apiClient.post<WorkflowDetail>('/workflows', data);
+    return res.data;
+};
+
+export const apiUpdateWorkflow = async (
+    workflowId: string,
+    data: Partial<WorkflowDetail> & { change_summary?: string }
+): Promise<WorkflowDetail> => {
+    const res = await apiClient.patch<WorkflowDetail>(`/workflows/${workflowId}`, data);
+    return res.data;
+};
+
+export const apiValidateWorkflow = async (workflowId: string, version?: number): Promise<WorkflowValidationResponse> => {
+    const res = await apiClient.post<WorkflowValidationResponse>(`/workflows/${workflowId}/validate`, null, {
+        params: version ? { version } : undefined,
+    });
+    return res.data;
+};
+
+export const apiActivateWorkflow = async (
+    workflowId: string,
+    approved: boolean,
+    version?: number
+): Promise<WorkflowDetail> => {
+    const res = await apiClient.post<WorkflowDetail>(`/workflows/${workflowId}/activate`, {
+        approved,
+        version,
+    });
+    return res.data;
+};
+
+export const apiPauseWorkflow = async (workflowId: string): Promise<WorkflowDetail> => {
+    const res = await apiClient.post<WorkflowDetail>(`/workflows/${workflowId}/pause`);
+    return res.data;
+};
+
+export const apiResumeWorkflow = async (workflowId: string): Promise<WorkflowDetail> => {
+    const res = await apiClient.post<WorkflowDetail>(`/workflows/${workflowId}/resume`);
+    return res.data;
+};
+
+export const apiArchiveWorkflow = async (workflowId: string): Promise<WorkflowDetail> => {
+    const res = await apiClient.post<WorkflowDetail>(`/workflows/${workflowId}/archive`);
+    return res.data;
+};
+
+export const apiListWorkflowVersions = async (workflowId: string): Promise<WorkflowVersionRecord[]> => {
+    const res = await apiClient.get<WorkflowVersionRecord[]>(`/workflows/${workflowId}/versions`);
+    return res.data;
+};
+
+export const apiGetWorkflowVersion = async (workflowId: string, version: number): Promise<WorkflowVersionRecord> => {
+    const res = await apiClient.get<WorkflowVersionRecord>(`/workflows/${workflowId}/versions/${version}`);
+    return res.data;
+};
+
+export interface WorkflowPromptEditResponse {
+    generation_id: string;
+    workflow_id: string;
+    workflow?: WorkflowDetail;
+    result: {
+        success: boolean;
+        status: string;
+        workflow?: any;
+        clarifications?: any[];
+        explanation?: any;
+        errors?: string[];
+    };
+}
+
+export const apiPromptEditWorkflow = async (
+    workflowId: string,
+    prompt: string,
+    saveDraft: boolean = true
+): Promise<WorkflowPromptEditResponse> => {
+    const res = await apiClient.post<WorkflowPromptEditResponse>(`/workflows/${workflowId}/prompt-edit`, {
+        prompt,
+        save_draft: saveDraft,
+    });
+    return res.data;
+};
+
+export const apiListTools = async (): Promise<ToolItem[]> => {
+    const res = await apiClient.get<ToolItem[]>('/tools');
+    return res.data;
+};
+

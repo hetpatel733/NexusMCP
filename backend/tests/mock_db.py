@@ -5,6 +5,33 @@ from typing import Any, Dict, List, Optional
 from bson import ObjectId
 
 
+def _get_nested(doc: Dict[str, Any], key: str) -> Any:
+    if "." not in key:
+        return doc.get(key)
+    parts = key.split(".")
+    cur = doc
+    for p in parts:
+        if isinstance(cur, dict) and p in cur:
+            cur = cur[p]
+        else:
+            return None
+    return cur
+
+
+def _set_nested(doc: Dict[str, Any], set_dict: Dict[str, Any]) -> None:
+    for k, v in set_dict.items():
+        if "." in k:
+            parts = k.split(".")
+            cur = doc
+            for p in parts[:-1]:
+                if p not in cur or not isinstance(cur[p], dict):
+                    cur[p] = {}
+                cur = cur[p]
+            cur[parts[-1]] = copy.deepcopy(v)
+        else:
+            doc[k] = copy.deepcopy(v)
+
+
 def match_filter(doc: Dict[str, Any], filter_dict: Dict[str, Any]) -> bool:
     for k, v in filter_dict.items():
         if k == "$or":
@@ -19,7 +46,7 @@ def match_filter(doc: Dict[str, Any], filter_dict: Dict[str, Any]) -> bool:
                 return False
         elif isinstance(v, dict):
             # Operators like {"$gt": val}
-            doc_val = doc.get(k)
+            doc_val = _get_nested(doc, k)
             for op, target in v.items():
                 if op == "$gt":
                     if doc_val is None or doc_val <= target:
@@ -31,7 +58,7 @@ def match_filter(doc: Dict[str, Any], filter_dict: Dict[str, Any]) -> bool:
                     if doc_val not in target:
                         return False
         else:
-            if doc.get(k) != v:
+            if _get_nested(doc, k) != v:
                 return False
     return True
 
@@ -73,10 +100,11 @@ class MockCursor:
 
 
 class MockResult:
-    def __init__(self, inserted_id=None, modified_count=0, deleted_count=0):
+    def __init__(self, inserted_id=None, modified_count=0, deleted_count=0, upserted_id=None):
         self.inserted_id = inserted_id
         self.modified_count = modified_count
         self.deleted_count = deleted_count
+        self.upserted_id = upserted_id or inserted_id
 
 
 class MockCollection:
@@ -104,14 +132,34 @@ class MockCollection:
         matched = [d for d in self.docs if match_filter(d, filter_dict)]
         return MockCursor(matched)
 
-    async def update_one(self, filter_dict: Dict[str, Any], update_dict: Dict[str, Any]):
+    async def update_one(self, filter_dict: Dict[str, Any], update_dict: Dict[str, Any], upsert: bool = False):
         mod_count = 0
+        found = False
         for d in self.docs:
             if match_filter(d, filter_dict):
+                found = True
                 if "$set" in update_dict:
-                    d.update(copy.deepcopy(update_dict["$set"]))
+                    _set_nested(d, update_dict["$set"])
+                if "$inc" in update_dict:
+                    for inc_k, inc_v in update_dict["$inc"].items():
+                        d[inc_k] = d.get(inc_k, 0) + inc_v
                 mod_count = 1
-                break
+                return MockResult(modified_count=mod_count)
+
+        if not found and upsert:
+            new_doc = copy.deepcopy(filter_dict)
+            if "$set" in update_dict:
+                _set_nested(new_doc, update_dict["$set"])
+            if "$setOnInsert" in update_dict:
+                _set_nested(new_doc, update_dict["$setOnInsert"])
+            if "$inc" in update_dict:
+                for inc_k, inc_v in update_dict["$inc"].items():
+                    new_doc[inc_k] = inc_v
+            if "_id" not in new_doc:
+                new_doc["_id"] = ObjectId()
+            self.docs.append(new_doc)
+            return MockResult(inserted_id=new_doc["_id"], modified_count=1)
+
         return MockResult(modified_count=mod_count)
 
     async def update_many(self, filter_dict: Dict[str, Any], update_dict: Dict[str, Any]):

@@ -39,6 +39,20 @@ STRICT REQUIREMENTS:
 7. NEVER execute tools or include arbitrary code. Workflows represent declarative execution definitions only.
 """
 
+SYSTEM_PROMPT_WORKFLOW_REVISE = """You are the NexusMCP Workflow Reviser.
+Your task is to modify and revise an EXISTING NexusMCP WorkflowDefinition according to the user's change request.
+
+STRICT REQUIREMENTS:
+1. Modify the existing workflow according to the user's instructions while preserving unaffected steps, triggers, and mappings.
+2. You may ONLY reference tools that appear in the PERMITTED TOOLS list below. Never invent tool IDs.
+3. The trigger must be one of: webhook, polling, schedule, manual.
+4. Every step must have a unique ID (e.g. step_1, step_2), valid tool_id, provider, and error_policy.
+5. Step dependencies must form a valid Directed Acyclic Graph (DAG) with no cycles.
+6. If data from a previous step or trigger is needed, use data_mappings with source paths like 'trigger.data.issue.title' or 'steps.step_1.output.id'.
+7. NEVER include placeholder values like '<INSERT_CHANNEL_ID>' or fabricated identifiers.
+8. NEVER execute tools or include arbitrary code. Workflows represent declarative execution definitions only.
+"""
+
 SYSTEM_PROMPT_EXPLANATION = """You are the NexusMCP Workflow Explainer.
 Your task is to generate a clear, transparent, human-readable explanation of the generated workflow definition.
 
@@ -93,6 +107,44 @@ Generate a strictly valid NexusMCP WorkflowDefinition using only the permitted t
 """
     return [
         {"role": "system", "content": SYSTEM_PROMPT_WORKFLOW_GEN},
+        {"role": "user", "content": content},
+    ]
+
+
+def build_workflow_revise_prompt(
+    sanitized_user_prompt: str,
+    existing_workflow: Dict[str, Any],
+    permitted_tools: List[Dict[str, Any]],
+) -> List[Dict[str, str]]:
+    tools_summary = []
+    for t in permitted_tools:
+        tools_summary.append({
+            "id": t.get("id"),
+            "provider": t.get("provider"),
+            "name": t.get("name"),
+            "description": t.get("description"),
+            "input_schema": t.get("input_schema", {}),
+            "risk_category": t.get("risk_category", "low"),
+            "connection_required": t.get("connection_required", False),
+        })
+
+    tools_json = json.dumps(tools_summary, indent=2)
+    existing_json = json.dumps(existing_workflow, indent=2)
+
+    content = f"""CURRENT WORKFLOW DEFINITION TO MODIFY:
+{existing_json}
+
+USER CHANGE REQUEST:
+\"\"\"{sanitized_user_prompt}\"\"\"
+
+PERMITTED TOOLS (You may ONLY choose from these tools):
+{tools_json}
+
+Revise the workflow definition according to the change request above. Maintain existing elements that were not requested to change.
+Return a strictly valid NexusMCP WorkflowDefinition.
+"""
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT_WORKFLOW_REVISE},
         {"role": "user", "content": content},
     ]
 

@@ -4,9 +4,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .api.v1 import audit, auth, connections, health, tools, workflows, workspaces
-from .db import close_db, init_db
+from .api.v1 import audit, auth, connections, executions, health, tools, triggers, workflows, workspaces
+from .db import close_db, get_db, init_db
 from .logger import logger
+from .triggers.service import TriggerIngestionService
 
 
 @asynccontextmanager
@@ -14,6 +15,12 @@ async def lifespan(app: FastAPI):
     logger.info("Starting up NexusMCP backend")
     try:
         await init_db()
+        db = await get_db()
+        # Crash recovery for durable event ingestion
+        ingestion_service = TriggerIngestionService(db)
+        recovered = await ingestion_service.recover_unprocessed_events()
+        if recovered > 0:
+            logger.info("Recovered unprocessed trigger events", count=recovered)
     except Exception as e:
         logger.error("Startup DB initialization failed", error=str(e))
     yield
@@ -53,3 +60,5 @@ app.include_router(audit.router, prefix="/api/v1")
 app.include_router(workflows.router, prefix="/api/v1")
 app.include_router(connections.router, prefix="/api/v1")
 app.include_router(tools.router, prefix="/api/v1")
+app.include_router(triggers.router, prefix="/api/v1")
+app.include_router(executions.router, prefix="/api/v1")

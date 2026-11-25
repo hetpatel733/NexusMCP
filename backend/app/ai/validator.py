@@ -74,6 +74,27 @@ def validate_workflow_dag(workflow: WorkflowDefinition) -> List[str]:
                 errors.append("Cyclic dependency detected in workflow steps")
                 break
 
+    # Unreachable nodes detection
+    if workflow.steps:
+        entry_steps = {s.id for s in workflow.steps if not s.dependencies}
+        if not entry_steps:
+            errors.append("Unreachable nodes detected: workflow has no entry step with empty dependencies")
+        else:
+            reachable: Set[str] = set(entry_steps)
+            changed = True
+            while changed:
+                changed = False
+                for step in workflow.steps:
+                    if step.id not in reachable:
+                        if step.dependencies and all(dep in reachable for dep in step.dependencies):
+                            reachable.add(step.id)
+                            changed = True
+
+            unreachable = step_ids - reachable
+            if unreachable:
+                for u_id in sorted(unreachable):
+                    errors.append(f"Unreachable step '{u_id}' detected: dependencies cannot be satisfied from workflow entry points")
+
     return errors
 
 
@@ -148,9 +169,32 @@ def validate_placeholder_values(workflow: WorkflowDefinition) -> List[str]:
     return errors
 
 
+def validate_tool_arguments(
+    workflow: WorkflowDefinition,
+    tool_descriptors: Dict[str, Any],
+) -> List[str]:
+    """Validate step arguments against declared tool input schemas if available."""
+    errors: List[str] = []
+    for step in workflow.steps:
+        desc = tool_descriptors.get(step.tool_id)
+        if desc and hasattr(desc, "input_schema") and desc.input_schema:
+            schema = desc.input_schema
+            required_props = getattr(schema, "required", []) or []
+            mapped_fields = {m.target_field for m in step.data_mappings}
+            provided_fields = set(step.arguments.keys()) | mapped_fields
+
+            for req in required_props:
+                if req not in provided_fields:
+                    errors.append(
+                        f"Step '{step.id}' using tool '{step.tool_id}' is missing required argument '{req}'"
+                    )
+    return errors
+
+
 def validate_workflow_definition(
     workflow: WorkflowDefinition,
     permitted_tool_ids: Set[str],
+    tool_descriptors: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """Comprehensive validation running all checks."""
     errors: List[str] = []
@@ -159,4 +203,6 @@ def validate_workflow_definition(
     errors.extend(validate_workflow_tools(workflow, permitted_tool_ids))
     errors.extend(validate_data_mappings(workflow))
     errors.extend(validate_placeholder_values(workflow))
+    if tool_descriptors:
+        errors.extend(validate_tool_arguments(workflow, tool_descriptors))
     return errors

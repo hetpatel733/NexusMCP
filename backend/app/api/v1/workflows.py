@@ -32,6 +32,18 @@ class WorkflowGenerateResponse(BaseModel):
     result: WorkflowGenerationResult
 
 
+class WorkflowPromptEditRequest(BaseModel):
+    prompt: str = Field(min_length=3, max_length=2000, description="Natural-language description of requested workflow changes")
+    save_draft: bool = Field(default=True, description="Whether to apply changes immediately as a new version or draft")
+
+
+class WorkflowPromptEditResponse(BaseModel):
+    generation_id: str
+    workflow_id: str
+    workflow: Optional[Dict[str, Any]] = None
+    result: WorkflowGenerationResult
+
+
 class WorkflowValidateRequest(BaseModel):
     workflow: Dict[str, Any]
 
@@ -45,7 +57,8 @@ class WorkflowCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: Optional[str] = Field(default=None, max_length=500)
     status: str = Field(default="draft")
-    trigger: Dict[str, Any] = Field(default_factory=dict)
+    required_integrations: List[str] = Field(default_factory=list)
+    trigger: Dict[str, Any] = Field(default_factory=lambda: {"type": "manual"})
     steps: List[Dict[str, Any]] = Field(default_factory=list)
 
 
@@ -53,6 +66,36 @@ class WorkflowUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
+    trigger: Optional[Dict[str, Any]] = None
+    steps: Optional[List[Dict[str, Any]]] = None
+    required_integrations: Optional[List[str]] = None
+    change_summary: Optional[str] = None
+
+
+class WorkflowActivateRequest(BaseModel):
+    approved: bool = Field(description="Explicit user approval confirmation")
+    version: Optional[int] = Field(default=None, description="Optional version to activate (defaults to current_version)")
+
+
+class WorkflowDetailResponse(BaseModel):
+    id: str
+    workspace_id: str
+    name: str
+    description: Optional[str] = None
+    status: str
+    schema_version: str
+    current_version: int = 1
+    active_version: Optional[int] = None
+    required_integrations: List[str] = Field(default_factory=list)
+    trigger: Dict[str, Any] = Field(default_factory=dict)
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
+    validation_errors: List[str] = Field(default_factory=list)
+    approved_at: Optional[datetime] = None
+    approved_by: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WorkflowResponse(BaseModel):
@@ -61,6 +104,8 @@ class WorkflowResponse(BaseModel):
     name: str
     description: Optional[str] = None
     status: str
+    current_version: int = 1
+    active_version: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -89,6 +134,8 @@ async def list_workflows(
             name=wf["name"],
             description=wf.get("description"),
             status=wf.get("status", "draft"),
+            current_version=wf.get("current_version", 1),
+            active_version=wf.get("active_version"),
             created_at=wf.get("created_at", datetime.now(timezone.utc)),
             updated_at=wf.get("updated_at", datetime.now(timezone.utc))
         )
@@ -149,6 +196,74 @@ async def generate_workflow_from_prompt(
     )
 
 
+@router.post("/{workflow_id}/prompt-edit", response_model=WorkflowPromptEditResponse)
+async def prompt_edit_workflow(
+    workflow_id: str,
+    data: WorkflowPromptEditRequest,
+    request: Request,
+    workspace_and_role=Depends(get_current_workspace),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    database=Depends(get_db),
+):
+    """Edit an existing workflow using a natural-language prompt."""
+    workspace, _ = workspace_and_role
+    service = WorkflowService(database)
+
+    res = await service.edit_workflow_via_prompt(
+        workspace_id=workspace["id"],
+        user_id=current_user["id"],
+        workflow_id=workflow_id,
+        prompt=data.prompt,
+        save_draft=data.save_draft,
+    )
+
+    wf_dict = res.get("workflow")
+    formatted_wf = None
+    if wf_dict:
+        formatted_wf = {
+            "id": str(wf_dict["_id"]),
+            "workspace_id": wf_dict["workspace_id"],
+            "name": wf_dict["name"],
+            "description": wf_dict.get("description"),
+            "status": wf_dict.get("status", "draft"),
+            "schema_version": wf_dict.get("schema_version", CURRENT_WORKFLOW_SCHEMA_VERSION),
+            "current_version": wf_dict.get("current_version", 1),
+            "active_version": wf_dict.get("active_version"),
+            "required_integrations": wf_dict.get("required_integrations", []),
+            "trigger": wf_dict.get("trigger", {}),
+            "steps": wf_dict.get("steps", []),
+            "validation_errors": wf_dict.get("validation_errors", []),
+            "created_at": wf_dict.get("created_at", datetime.now(timezone.utc)),
+            "updated_at": wf_dict.get("updated_at", datetime.now(timezone.utc)),
+        }
+
+    ip, ua = get_client_info(request)
+    audit_repo = AuditRepository(database)
+    await audit_repo.record_event(
+        action=AuditAction.WORKFLOW_PROMPT_EDIT,
+        workspace_id=workspace["id"],
+        user_id=current_user["id"],
+        user_email=current_user["email"],
+        resource_type="workflow",
+        resource_id=workflow_id,
+        details={
+            "prompt": data.prompt,
+            "success": res["result"]["success"],
+            "status": res["result"]["status"],
+            "save_draft": data.save_draft,
+        },
+        ip_address=ip,
+        user_agent=ua,
+    )
+
+    return WorkflowPromptEditResponse(
+        generation_id=res["generation_id"],
+        workflow_id=workflow_id,
+        workflow=formatted_wf,
+        result=WorkflowGenerationResult.model_validate(res["result"]),
+    )
+
+
 @router.post("/validate", response_model=WorkflowValidateResponse)
 async def validate_workflow_endpoint(
     data: WorkflowValidateRequest,
@@ -196,7 +311,7 @@ async def get_generation_detail(
     return record
 
 
-@router.post("", response_model=WorkflowResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=WorkflowDetailResponse, status_code=status.HTTP_201_CREATED)
 async def create_workflow(
     data: WorkflowCreateRequest,
     request: Request,
@@ -206,21 +321,13 @@ async def create_workflow(
 ):
     """Create a workflow strictly bound to the active workspace."""
     workspace, _ = workspace_and_role
-    repo = WorkflowRepository(database)
-    now = datetime.now(timezone.utc)
+    service = WorkflowService(database)
 
-    doc = {
-        "workspace_id": workspace["id"],
-        "name": data.name,
-        "description": data.description,
-        "status": data.status,
-        "trigger": data.trigger,
-        "steps": data.steps,
-        "created_by": current_user["id"],
-        "created_at": now,
-        "updated_at": now,
-    }
-    wf_id = await repo.create(doc)
+    saved = await service.create_workflow(
+        workspace_id=workspace["id"],
+        user_id=current_user["id"],
+        data=data.model_dump(),
+    )
 
     ip, ua = get_client_info(request)
     audit_repo = AuditRepository(database)
@@ -230,30 +337,39 @@ async def create_workflow(
         user_id=current_user["id"],
         user_email=current_user["email"],
         resource_type="workflow",
-        resource_id=wf_id,
-        details={"name": data.name, "status": data.status},
+        resource_id=str(saved["_id"]),
+        details={"name": data.name, "status": saved["status"], "version": saved.get("current_version", 1)},
         ip_address=ip,
         user_agent=ua
     )
 
-    return WorkflowResponse(
-        id=wf_id,
-        workspace_id=workspace["id"],
-        name=data.name,
-        description=data.description,
-        status=data.status,
-        created_at=now,
-        updated_at=now
+    return WorkflowDetailResponse(
+        id=str(saved["_id"]),
+        workspace_id=saved["workspace_id"],
+        name=saved["name"],
+        description=saved.get("description"),
+        status=saved.get("status", "draft"),
+        schema_version=saved.get("schema_version", CURRENT_WORKFLOW_SCHEMA_VERSION),
+        current_version=saved.get("current_version", 1),
+        active_version=saved.get("active_version"),
+        required_integrations=saved.get("required_integrations", []),
+        trigger=saved.get("trigger", {}),
+        steps=saved.get("steps", []),
+        validation_errors=saved.get("validation_errors", []),
+        approved_at=saved.get("approved_at"),
+        approved_by=saved.get("approved_by"),
+        created_at=saved.get("created_at", datetime.now(timezone.utc)),
+        updated_at=saved.get("updated_at", datetime.now(timezone.utc))
     )
 
 
-@router.get("/{workflow_id}", response_model=WorkflowResponse)
+@router.get("/{workflow_id}", response_model=WorkflowDetailResponse)
 async def get_workflow(
     workflow_id: str,
     workspace_and_role=Depends(get_current_workspace),
     database=Depends(get_db)
 ):
-    """Strict tenant-isolated workflow retrieval."""
+    """Strict tenant-isolated workflow detail retrieval."""
     workspace, _ = workspace_and_role
     repo = WorkflowRepository(database)
     wf = await repo.get_workflow(workspace["id"], workflow_id)
@@ -262,18 +378,27 @@ async def get_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found in this workspace",
         )
-    return WorkflowResponse(
+    return WorkflowDetailResponse(
         id=str(wf["_id"]),
         workspace_id=wf["workspace_id"],
         name=wf["name"],
         description=wf.get("description"),
         status=wf.get("status", "draft"),
+        schema_version=wf.get("schema_version", CURRENT_WORKFLOW_SCHEMA_VERSION),
+        current_version=wf.get("current_version", 1),
+        active_version=wf.get("active_version"),
+        required_integrations=wf.get("required_integrations", []),
+        trigger=wf.get("trigger", {}),
+        steps=wf.get("steps", []),
+        validation_errors=wf.get("validation_errors", []),
+        approved_at=wf.get("approved_at"),
+        approved_by=wf.get("approved_by"),
         created_at=wf.get("created_at", datetime.now(timezone.utc)),
         updated_at=wf.get("updated_at", datetime.now(timezone.utc))
     )
 
 
-@router.patch("/{workflow_id}", response_model=WorkflowResponse)
+@router.patch("/{workflow_id}", response_model=WorkflowDetailResponse)
 async def update_workflow(
     workflow_id: str,
     data: WorkflowUpdateRequest,
@@ -282,57 +407,319 @@ async def update_workflow(
     current_user: Dict[str, Any] = Depends(get_current_user),
     database=Depends(get_db)
 ):
-    """Strict tenant-isolated workflow update."""
+    """Strict tenant-isolated workflow update with immutable versioning."""
     workspace, _ = workspace_and_role
-    repo = WorkflowRepository(database)
-    existing = await repo.get_workflow(workspace["id"], workflow_id)
-    if not existing:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Workflow not found in this workspace",
-        )
+    service = WorkflowService(database)
 
-    now = datetime.now(timezone.utc)
-    update_data: Dict[str, Any] = {"updated_at": now}
-    if data.name is not None:
-        update_data["name"] = data.name
-    if data.description is not None:
-        update_data["description"] = data.description
-    if data.status is not None:
-        update_data["status"] = data.status
+    # Filter non-None fields
+    update_payload = {k: v for k, v in data.model_dump().items() if v is not None}
 
-    await repo.update_workflow(workspace["id"], workflow_id, update_data)
-
-    action = AuditAction.WORKFLOW_UPDATE
-    if data.status == "active":
-        action = AuditAction.WORKFLOW_ENABLE
-    elif data.status == "paused" or data.status == "disabled":
-        action = AuditAction.WORKFLOW_DISABLE
+    updated = await service.update_workflow_definition(
+        workspace_id=workspace["id"],
+        user_id=current_user["id"],
+        workflow_id=workflow_id,
+        data=update_payload,
+        change_summary=data.change_summary,
+    )
 
     ip, ua = get_client_info(request)
     audit_repo = AuditRepository(database)
     await audit_repo.record_event(
-        action=action,
+        action=AuditAction.WORKFLOW_UPDATE,
         workspace_id=workspace["id"],
         user_id=current_user["id"],
         user_email=current_user["email"],
         resource_type="workflow",
         resource_id=workflow_id,
-        details={"updated_fields": list(update_data.keys())},
+        details={
+            "updated_fields": list(update_payload.keys()),
+            "current_version": updated.get("current_version"),
+            "status": updated.get("status"),
+        },
         ip_address=ip,
         user_agent=ua
     )
 
-    updated = await repo.get_workflow(workspace["id"], workflow_id)
-    assert updated is not None
-    return WorkflowResponse(
+    return WorkflowDetailResponse(
         id=str(updated["_id"]),
         workspace_id=updated["workspace_id"],
         name=updated["name"],
         description=updated.get("description"),
         status=updated.get("status", "draft"),
-        created_at=updated.get("created_at", now),
-        updated_at=updated.get("updated_at", now)
+        schema_version=updated.get("schema_version", CURRENT_WORKFLOW_SCHEMA_VERSION),
+        current_version=updated.get("current_version", 1),
+        active_version=updated.get("active_version"),
+        required_integrations=updated.get("required_integrations", []),
+        trigger=updated.get("trigger", {}),
+        steps=updated.get("steps", []),
+        validation_errors=updated.get("validation_errors", []),
+        approved_at=updated.get("approved_at"),
+        approved_by=updated.get("approved_by"),
+        created_at=updated.get("created_at", datetime.now(timezone.utc)),
+        updated_at=updated.get("updated_at", datetime.now(timezone.utc))
+    )
+
+
+@router.post("/{workflow_id}/validate")
+async def validate_workflow_record(
+    workflow_id: str,
+    version: Optional[int] = None,
+    workspace_and_role=Depends(get_current_workspace),
+    database=Depends(get_db)
+):
+    """Validate a stored workflow against DAG, tool registry, parameters, reachability and integrations."""
+    workspace, _ = workspace_and_role
+    service = WorkflowService(database)
+    return await service.validate_workflow_by_id(
+        workspace_id=workspace["id"],
+        workflow_id=workflow_id,
+        version=version,
+    )
+
+
+@router.post("/{workflow_id}/activate", response_model=WorkflowDetailResponse)
+async def activate_workflow_endpoint(
+    workflow_id: str,
+    data: WorkflowActivateRequest,
+    request: Request,
+    workspace_and_role=Depends(require_role([WorkspaceRole.OWNER, WorkspaceRole.ADMIN, WorkspaceRole.MEMBER])),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    database=Depends(get_db)
+):
+    """Activate a workflow with explicit user approval and deterministic verification."""
+    workspace, _ = workspace_and_role
+    service = WorkflowService(database)
+
+    updated = await service.activate_workflow(
+        workspace_id=workspace["id"],
+        user_id=current_user["id"],
+        workflow_id=workflow_id,
+        approved=data.approved,
+        version=data.version,
+    )
+
+    ip, ua = get_client_info(request)
+    audit_repo = AuditRepository(database)
+    await audit_repo.record_event(
+        action=AuditAction.WORKFLOW_ENABLE,
+        workspace_id=workspace["id"],
+        user_id=current_user["id"],
+        user_email=current_user["email"],
+        resource_type="workflow",
+        resource_id=workflow_id,
+        details={
+            "active_version": updated.get("active_version"),
+            "approved": data.approved,
+        },
+        ip_address=ip,
+        user_agent=ua
+    )
+
+    return WorkflowDetailResponse(
+        id=str(updated["_id"]),
+        workspace_id=updated["workspace_id"],
+        name=updated["name"],
+        description=updated.get("description"),
+        status=updated.get("status", "draft"),
+        schema_version=updated.get("schema_version", CURRENT_WORKFLOW_SCHEMA_VERSION),
+        current_version=updated.get("current_version", 1),
+        active_version=updated.get("active_version"),
+        required_integrations=updated.get("required_integrations", []),
+        trigger=updated.get("trigger", {}),
+        steps=updated.get("steps", []),
+        validation_errors=updated.get("validation_errors", []),
+        approved_at=updated.get("approved_at"),
+        approved_by=updated.get("approved_by"),
+        created_at=updated.get("created_at", datetime.now(timezone.utc)),
+        updated_at=updated.get("updated_at", datetime.now(timezone.utc))
+    )
+
+
+@router.post("/{workflow_id}/pause", response_model=WorkflowDetailResponse)
+async def pause_workflow_endpoint(
+    workflow_id: str,
+    request: Request,
+    workspace_and_role=Depends(get_current_workspace),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    database=Depends(get_db)
+):
+    """Pause an active workflow."""
+    workspace, _ = workspace_and_role
+    service = WorkflowService(database)
+    updated = await service.pause_workflow(workspace["id"], current_user["id"], workflow_id)
+
+    ip, ua = get_client_info(request)
+    audit_repo = AuditRepository(database)
+    await audit_repo.record_event(
+        action=AuditAction.WORKFLOW_PAUSE,
+        workspace_id=workspace["id"],
+        user_id=current_user["id"],
+        user_email=current_user["email"],
+        resource_type="workflow",
+        resource_id=workflow_id,
+        ip_address=ip,
+        user_agent=ua
+    )
+
+    return WorkflowDetailResponse(
+        id=str(updated["_id"]),
+        workspace_id=updated["workspace_id"],
+        name=updated["name"],
+        description=updated.get("description"),
+        status=updated.get("status", "draft"),
+        schema_version=updated.get("schema_version", CURRENT_WORKFLOW_SCHEMA_VERSION),
+        current_version=updated.get("current_version", 1),
+        active_version=updated.get("active_version"),
+        required_integrations=updated.get("required_integrations", []),
+        trigger=updated.get("trigger", {}),
+        steps=updated.get("steps", []),
+        validation_errors=updated.get("validation_errors", []),
+        approved_at=updated.get("approved_at"),
+        approved_by=updated.get("approved_by"),
+        created_at=updated.get("created_at", datetime.now(timezone.utc)),
+        updated_at=updated.get("updated_at", datetime.now(timezone.utc))
+    )
+
+
+@router.post("/{workflow_id}/resume", response_model=WorkflowDetailResponse)
+async def resume_workflow_endpoint(
+    workflow_id: str,
+    request: Request,
+    workspace_and_role=Depends(get_current_workspace),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    database=Depends(get_db)
+):
+    """Resume a paused workflow."""
+    workspace, _ = workspace_and_role
+    service = WorkflowService(database)
+    updated = await service.resume_workflow(workspace["id"], current_user["id"], workflow_id)
+
+    ip, ua = get_client_info(request)
+    audit_repo = AuditRepository(database)
+    await audit_repo.record_event(
+        action=AuditAction.WORKFLOW_RESUME,
+        workspace_id=workspace["id"],
+        user_id=current_user["id"],
+        user_email=current_user["email"],
+        resource_type="workflow",
+        resource_id=workflow_id,
+        ip_address=ip,
+        user_agent=ua
+    )
+
+    return WorkflowDetailResponse(
+        id=str(updated["_id"]),
+        workspace_id=updated["workspace_id"],
+        name=updated["name"],
+        description=updated.get("description"),
+        status=updated.get("status", "draft"),
+        schema_version=updated.get("schema_version", CURRENT_WORKFLOW_SCHEMA_VERSION),
+        current_version=updated.get("current_version", 1),
+        active_version=updated.get("active_version"),
+        required_integrations=updated.get("required_integrations", []),
+        trigger=updated.get("trigger", {}),
+        steps=updated.get("steps", []),
+        validation_errors=updated.get("validation_errors", []),
+        approved_at=updated.get("approved_at"),
+        approved_by=updated.get("approved_by"),
+        created_at=updated.get("created_at", datetime.now(timezone.utc)),
+        updated_at=updated.get("updated_at", datetime.now(timezone.utc))
+    )
+
+
+@router.post("/{workflow_id}/archive", response_model=WorkflowDetailResponse)
+async def archive_workflow_endpoint(
+    workflow_id: str,
+    request: Request,
+    workspace_and_role=Depends(require_role([WorkspaceRole.OWNER, WorkspaceRole.ADMIN])),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    database=Depends(get_db)
+):
+    """Archive a workflow."""
+    workspace, _ = workspace_and_role
+    service = WorkflowService(database)
+    updated = await service.archive_workflow(workspace["id"], current_user["id"], workflow_id)
+
+    ip, ua = get_client_info(request)
+    audit_repo = AuditRepository(database)
+    await audit_repo.record_event(
+        action=AuditAction.WORKFLOW_ARCHIVE,
+        workspace_id=workspace["id"],
+        user_id=current_user["id"],
+        user_email=current_user["email"],
+        resource_type="workflow",
+        resource_id=workflow_id,
+        ip_address=ip,
+        user_agent=ua
+    )
+
+    return WorkflowDetailResponse(
+        id=str(updated["_id"]),
+        workspace_id=updated["workspace_id"],
+        name=updated["name"],
+        description=updated.get("description"),
+        status=updated.get("status", "draft"),
+        schema_version=updated.get("schema_version", CURRENT_WORKFLOW_SCHEMA_VERSION),
+        current_version=updated.get("current_version", 1),
+        active_version=updated.get("active_version"),
+        required_integrations=updated.get("required_integrations", []),
+        trigger=updated.get("trigger", {}),
+        steps=updated.get("steps", []),
+        validation_errors=updated.get("validation_errors", []),
+        approved_at=updated.get("approved_at"),
+        approved_by=updated.get("approved_by"),
+        created_at=updated.get("created_at", datetime.now(timezone.utc)),
+        updated_at=updated.get("updated_at", datetime.now(timezone.utc))
+    )
+
+
+@router.get("/{workflow_id}/versions")
+async def list_workflow_versions(
+    workflow_id: str,
+    workspace_and_role=Depends(get_current_workspace),
+    database=Depends(get_db)
+):
+    """List immutable version history for a workflow."""
+    workspace, _ = workspace_and_role
+    service = WorkflowService(database)
+    return await service.list_versions(workspace["id"], workflow_id)
+
+
+@router.get("/{workflow_id}/versions/{version}")
+async def get_workflow_version(
+    workflow_id: str,
+    version: int,
+    workspace_and_role=Depends(get_current_workspace),
+    database=Depends(get_db)
+):
+    """Fetch exact immutable version definition."""
+    workspace, _ = workspace_and_role
+    service = WorkflowService(database)
+    ver = await service.get_version(workspace["id"], workflow_id, version)
+    if not ver:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow version not found")
+    return ver
+
+
+@router.get("/{workflow_id}/execution-version")
+async def get_execution_version(
+    workflow_id: str,
+    execution_id: Optional[str] = None,
+    workspace_and_role=Depends(get_current_workspace),
+    database=Depends(get_db)
+):
+    """Resolve exact immutable workflow version for an execution or active trigger.
+
+    Requirement 7:
+    - Existing executions continue using their original workflow version.
+    - New triggers use the newly activated version.
+    """
+    workspace, _ = workspace_and_role
+    service = WorkflowService(database)
+    return await service.resolve_execution_version(
+        workspace_id=workspace["id"],
+        workflow_id=workflow_id,
+        execution_id=execution_id,
     )
 
 
@@ -353,6 +740,14 @@ async def delete_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workflow not found in this workspace",
         )
+
+    # Clean up any active trigger subscription
+    try:
+        from ...triggers.lifecycle import SubscriptionLifecycleManager
+        lifecycle = SubscriptionLifecycleManager(database)
+        await lifecycle.unregister_workflow_trigger(workspace["id"], workflow_id)
+    except Exception:
+        pass
 
     ip, ua = get_client_info(request)
     audit_repo = AuditRepository(database)

@@ -25,6 +25,12 @@ class AuditAction:
     WORKFLOW_ENABLE = "workflow.enable"
     WORKFLOW_DISABLE = "workflow.disable"
     WORKFLOW_GENERATE = "workflow.generate"
+    WORKFLOW_PROMPT_EDIT = "workflow.prompt.edit"
+    WORKFLOW_VERSION_CREATE = "workflow.version.create"
+    WORKFLOW_APPROVE = "workflow.approve"
+    WORKFLOW_PAUSE = "workflow.pause"
+    WORKFLOW_RESUME = "workflow.resume"
+    WORKFLOW_ARCHIVE = "workflow.archive"
 
     INTEGRATION_CONNECT_INITIATED = "integration.connect.initiated"
     INTEGRATION_CONNECT_REVOKED = "integration.connect.revoked"

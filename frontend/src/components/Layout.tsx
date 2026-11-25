@@ -54,6 +54,7 @@ export const Layout: React.FC = () => {
                     <Link to="/" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem' }}>Dashboard</Link>
                     {isAuthenticated && (
                         <>
+                            <Link to="/workflows" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem' }}>Workflows</Link>
                             <Link to="/designer" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem' }}>AI Designer</Link>
                             <Link to="/workspaces" style={{ color: '#cbd5e1', textDecoration: 'none', fontSize: '0.9rem' }}>Workspaces</Link>
                             {isAuditAuthorized && (

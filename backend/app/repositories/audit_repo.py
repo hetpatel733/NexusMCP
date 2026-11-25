@@ -3,24 +3,8 @@ from typing import Any, Dict, List, Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
+from ..security.redaction import redact_sensitive_data
 from .base import BaseRepository
-
-SENSITIVE_KEYS = {"password", "hashed_password", "token", "refresh_token", "access_token", "secret", "authorization"}
-
-
-def redact_sensitive_data(data: Any) -> Any:
-    """Recursively redact sensitive fields from audit logs and errors."""
-    if isinstance(data, dict):
-        redacted = {}
-        for k, v in data.items():
-            if any(s in k.lower() for s in SENSITIVE_KEYS):
-                redacted[k] = "[REDACTED]"
-            else:
-                redacted[k] = redact_sensitive_data(v)
-        return redacted
-    elif isinstance(data, list):
-        return [redact_sensitive_data(item) for item in data]
-    return data
 
 
 class AuditRepository(BaseRepository):

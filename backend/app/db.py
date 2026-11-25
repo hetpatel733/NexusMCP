@@ -87,14 +87,50 @@ async def create_indexes():
         await database.workflows.create_index([("workspace_id", 1), ("status", 1)])
 
         # Executions summary collection
-        await database.executions.create_index([("workspace_id", 1), ("workflow_id", 1)])
-        await database.executions.create_index("created_at")
+        await database.workflow_executions.create_index([("workspace_id", 1), ("workflow_id", 1)])
+        await database.workflow_executions.create_index([("workspace_id", 1), ("status", 1)])
+        await database.workflow_executions.create_index("created_at")
+
+        # Step executions collection
+        await database.step_executions.create_index(
+            [("workspace_id", 1), ("execution_id", 1), ("step_id", 1), ("attempt", 1)],
+            unique=True,
+        )
+        await database.step_executions.create_index([("workspace_id", 1), ("idempotency_key", 1)])
+
+        # Execution payloads collection
+        await database.execution_payloads.create_index(
+            [("workspace_id", 1), ("payload_id", 1)],
+            unique=True,
+        )
 
         # Connections collection: tenant-scoped connection records
         await database.connections.create_index([("workspace_id", 1), ("user_id", 1)])
         await database.connections.create_index([("workspace_id", 1), ("app_name", 1)])
         await database.connections.create_index("connection_id")
         await database.connections.create_index("external_user_id")
+
+        # Phase 7 Trigger & Ingestion collections
+        await database.deduplication_records.create_index(
+            [("workspace_id", 1), ("idempotency_key", 1)],
+            unique=True,
+        )
+        await database.deduplication_records.create_index(
+            [("expires_at", 1)],
+            expireAfterSeconds=0,
+        )
+        await database.trigger_events.create_index([("workspace_id", 1), ("received_at", -1)])
+        await database.trigger_events.create_index([("status", 1)])
+        await database.trigger_events.create_index([("event_id", 1)])
+        await database.trigger_subscriptions.create_index(
+            [("workspace_id", 1), ("workflow_id", 1)],
+            unique=True,
+        )
+        await database.trigger_subscriptions.create_index([("status", 1), ("trigger_type", 1)])
+        await database.trigger_checkpoints.create_index(
+            [("workspace_id", 1), ("workflow_id", 1)],
+            unique=True,
+        )
 
         db.indexes_created = True
         logger.info("MongoDB indexes verified/created")

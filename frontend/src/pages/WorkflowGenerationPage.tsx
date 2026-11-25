@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -261,14 +262,30 @@ export const WorkflowGenerationPage: React.FC = () => {
                     {/* Structured JSON Definition preview */}
                     {result.workflow && (
                         <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                                 <h3 style={{ margin: 0, fontSize: '1rem', color: '#0f172a' }}>
                                     Schema Definition (v{result.workflow.schema_version})
                                 </h3>
                                 {workflowId && (
-                                    <span style={{ fontSize: '0.8rem', color: '#16a34a', fontWeight: 600 }}>
-                                        Saved to Workspace Drafts (ID: {workflowId})
-                                    </span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                        <span style={{ fontSize: '0.8rem', color: '#16a34a', fontWeight: 600 }}>
+                                            Saved to Workspace Drafts
+                                        </span>
+                                        <Link
+                                            to={`/workflows/${workflowId}`}
+                                            style={{
+                                                padding: '0.35rem 0.75rem',
+                                                backgroundColor: '#2563eb',
+                                                color: '#fff',
+                                                textDecoration: 'none',
+                                                borderRadius: '4px',
+                                                fontSize: '0.8rem',
+                                                fontWeight: 600,
+                                            }}
+                                        >
+                                            Open in Workflow Editor &rarr;
+                                        </Link>
+                                    </div>
                                 )}
                             </div>
                             <pre style={{ backgroundColor: '#0f172a', color: '#f8fafc', padding: '1rem', borderRadius: '6px', overflowX: 'auto', fontSize: '0.85rem' }}>

@@ -31,6 +31,7 @@ from .prompts import (
     build_explanation_prompt,
     build_intent_prompt,
     build_workflow_prompt,
+    build_workflow_revise_prompt,
 )
 from .safety import sanitize_tool_text, sanitize_user_prompt
 from .validator import validate_workflow_definition
@@ -63,6 +64,7 @@ class PipelineState(TypedDict):
     clarifications: List[Dict[str, Any]]
     permitted_tools: List[Dict[str, Any]]
     permitted_tool_ids: List[str]
+    existing_workflow: Optional[Dict[str, Any]]
     workflow_definition: Optional[Dict[str, Any]]
     validation_errors: List[str]
     explanation: Optional[Dict[str, Any]]
@@ -227,12 +229,20 @@ class WorkflowGenerationPipeline:
         }
 
     async def _node_generate_workflow(self, state: PipelineState) -> Dict[str, Any]:
-        """Stage 4: Generate a workflow definition referencing only permitted tools."""
-        messages = build_workflow_prompt(
-            sanitized_user_prompt=state["sanitized_prompt"],
-            user_intent=state["user_intent"],
-            permitted_tools=state["permitted_tools"],
-        )
+        """Stage 4: Generate or revise a workflow definition referencing only permitted tools."""
+        existing_wf = state.get("existing_workflow")
+        if existing_wf:
+            messages = build_workflow_revise_prompt(
+                sanitized_user_prompt=state["sanitized_prompt"],
+                existing_workflow=existing_wf,
+                permitted_tools=state["permitted_tools"],
+            )
+        else:
+            messages = build_workflow_prompt(
+                sanitized_user_prompt=state["sanitized_prompt"],
+                user_intent=state["user_intent"],
+                permitted_tools=state["permitted_tools"],
+            )
 
         wf_def: WorkflowDefinition = await self.llm_client.generate_structured(
             messages=messages,
@@ -303,6 +313,7 @@ class WorkflowGenerationPipeline:
         prompt: str,
         workspace_id: str,
         user_id: str,
+        existing_workflow: Optional[Dict[str, Any]] = None,
     ) -> WorkflowGenerationResult:
         initial_state: PipelineState = {
             "raw_prompt": prompt,
@@ -317,6 +328,7 @@ class WorkflowGenerationPipeline:
             "clarifications": [],
             "permitted_tools": [],
             "permitted_tool_ids": [],
+            "existing_workflow": existing_workflow,
             "workflow_definition": None,
             "validation_errors": [],
             "explanation": None,

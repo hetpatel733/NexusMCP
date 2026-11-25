@@ -9,6 +9,7 @@ Follows Phase 5 specifications and rules.md:
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
@@ -158,3 +159,37 @@ class WorkflowGenerationResult(BaseModel):
 def get_workflow_json_schema() -> Dict[str, Any]:
     """Return the JSON schema representation of the WorkflowDefinition."""
     return WorkflowDefinition.model_json_schema()
+
+
+class WorkflowVersionRecord(BaseModel):
+    """Immutable snapshot record of a specific version of a workflow definition."""
+    id: str
+    workspace_id: str
+    workflow_id: str
+    version: int = Field(ge=1, description="Sequential integer version (1, 2, 3...)")
+    definition: WorkflowDefinition
+    change_summary: Optional[str] = Field(default=None, max_length=500)
+    created_by: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WorkflowExecutionRecord(BaseModel):
+    """Execution instance pinned to an exact immutable workflow version.
+
+    Requirement 7: Existing executions continue using their original workflow version.
+    """
+    id: str
+    workspace_id: str
+    workflow_id: str
+    workflow_version: int = Field(ge=1, description="Immutable workflow version used for this execution")
+    status: str = Field(default="pending", description="pending, running, completed, failed, cancelled")
+    triggered_by: str = Field(default="trigger", description="trigger, manual, webhook, polling, schedule")
+    trigger_event: Dict[str, Any] = Field(default_factory=dict)
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
