@@ -1,0 +1,23 @@
+# .gitignore
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+*.dist-info/
+build/
+*.log
+# Env files
+.env
+# Virtual env
+venv/
+# FastAPI
+*.sqlite3
+# Node
+node_modules/
+# Vite build
+dist/
+# Docker
+*.env
+# VS Code
+.vscode/

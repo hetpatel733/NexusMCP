@@ -1,0 +1,125 @@
+services:
+  # MongoDB for application data
+  mongodb:
+    image: mongo:7.0
+    container_name: nexusmcp_mongodb
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    ports:
+      - "${MONGO_EXTERNAL_PORT:-27018}:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # PostgreSQL for Temporal persistence
+  postgres:
+    image: postgres:15
+    container_name: nexusmcp_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-temporal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-temporal}
+      POSTGRES_DB: ${POSTGRES_DB:-temporal}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Temporal Server
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    container_name: nexusmcp_temporal
+    restart: always
+    ports:
+      - "7233:7233"
+    environment:
+      - DB=postgres12
+      - DB_PORT=${POSTGRES_PORT:-5432}
+      - POSTGRES_USER=${POSTGRES_USER:-temporal}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD:-temporal}
+      - POSTGRES_SEEDS=${POSTGRES_HOST:-postgres}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Temporal Web UI (Optional/Helpful for observability)
+  temporal-ui:
+    image: temporalio/ui:2.30.0
+    container_name: nexusmcp_temporal_ui
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:8080
+    depends_on:
+      - temporal
+
+  # FastAPI Backend API
+  backend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.backend
+    container_name: nexusmcp_backend
+    restart: always
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - ../.env
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Background Worker
+  worker:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.worker
+    container_name: nexusmcp_worker
+    restart: always
+    env_file:
+      - ../.env
+    depends_on:
+      backend:
+        condition: service_healthy
+      temporal:
+        condition: service_started
+
+  # Frontend (React + Vite served via Nginx)
+  frontend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+    container_name: nexusmcp_frontend
+    restart: always
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
+  postgres_data:

@@ -1,0 +1,20 @@
+# Worker Dockerfile
+FROM python:3.11-slim
+
+RUN groupadd -r appgroup && useradd -r -g appgroup -d /home/appuser -m appuser
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY backend /app
+
+RUN chown -R appuser:appgroup /app
+
+USER appuser
+
+CMD ["python", "-m", "app.worker"]
